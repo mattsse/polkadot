@@ -116,11 +116,14 @@ impl<Config: config::Config> XcmExecutor<Config> {
 
 		let maybe_holding_effects = match (origin.clone(), message) {
 			(origin, Xcm::WithdrawAsset { assets, effects }) => {
+				log::warn!(target: "pint_xcm", "do_execute_xcm: Xcm::WithdrawAsset {:?}  {:?}",origin, assets);
 				// Take `assets` from the origin account (on-chain) and place in holding.
 				let mut holding = Assets::default();
 				for asset in assets {
 					ensure!(!asset.is_wildcard(), XcmError::Wildcard);
+					log::warn!(target: "pint_xcm", "do_execute_xcm: Xcm::WithdrawAsset withdraw_asset {:?}", asset);
 					let withdrawn = Config::AssetTransactor::withdraw_asset(&asset, &origin)?;
+					log::warn!(target: "pint_xcm", "do_execute_xcm: Xcm::WithdrawAsset withdraw_asset {:?} SUCCESS", asset);
 					holding.saturating_subsume_all(withdrawn);
 				}
 				Some((holding, effects))
@@ -257,6 +260,7 @@ impl<Config: config::Config> XcmExecutor<Config> {
 				Config::XcmSender::send_xcm(dest, Xcm::QueryResponse { query_id, response: Response::Assets(assets) })?;
 			}
 			Order::BuyExecution { fees, weight, debt, halt_on_error, xcm } => {
+				log::warn!(target: "pint_xcm", "do_execute_xcm: Order::BuyExecution fees {:?} weight {:?}", fees, weight);
 				// pay for `weight` using up to `fees` of the holding account.
 				let purchasing_weight = Weight::from(weight.checked_add(debt).ok_or(XcmError::Overflow)?);
 				let max_fee = holding.try_take(fees).map_err(|()| XcmError::NotHoldingFees)?;
@@ -266,8 +270,13 @@ impl<Config: config::Config> XcmExecutor<Config> {
 				let mut remaining_weight = weight;
 				for message in xcm.into_iter() {
 					match Self::do_execute_xcm(origin.clone(), false, message, &mut remaining_weight, None, trader) {
-						Err(e) if halt_on_error => return Err(e),
-						Err(_) => {}
+						Err(e) if halt_on_error => {
+							log::warn!(target: "pint_xcm", "do_execute_xcm: Order::BuyExecution failed on error halt_on error");
+							return Err(e)
+						},
+						Err(_) => {
+							log::warn!(target: "pint_xcm", "do_execute_xcm: Order::BuyExecution failed on error");
+						}
 						Ok(surplus) => { total_surplus += surplus }
 					}
 				}
