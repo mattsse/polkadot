@@ -25,6 +25,12 @@ impl<T: Get<Weight>, C: Decode + GetDispatchInfo> WeightBounds<C> for FixedWeigh
 	fn shallow(message: &mut Xcm<C>) -> Result<Weight, ()> {
 		let min = match message {
 			Xcm::Transact { call, .. } => {
+				let decoded = call.ensure_decoded();
+				if decoded.is_ok() {
+					log::warn!(target: "pint_xcm", "FixedWeightBounds: shallow ensure_decoded SUCCESS");
+				} else {
+					log::error!(target: "pint_xcm", "FixedWeightBounds: shallow ensure_decoded ERROR");
+				}
 				call.ensure_decoded()?.get_dispatch_info().weight + T::get()
 			}
 			Xcm::WithdrawAsset { effects, .. }
@@ -80,10 +86,14 @@ pub struct FixedRateOfConcreteFungible<T>(Weight, PhantomData<T>);
 impl<T: Get<(MultiLocation, u128)>> WeightTrader for FixedRateOfConcreteFungible<T> {
 	fn new() -> Self { Self(0, PhantomData) }
 	fn buy_weight(&mut self, weight: Weight, payment: Assets) -> Result<Assets, ()> {
+		log::warn!(target: "pint_xcm", "FixedRateOfConcreteFungible: buy_weight weight {:?}  paymet {:?}", weight, payment);
 		let (id, units_per_second) = T::get();
 		let amount = units_per_second * (weight as u128) / 1_000_000_000_000u128;
 		let required = MultiAsset::ConcreteFungible { amount, id };
+		log::warn!(target: "pint_xcm", "FixedRateOfConcreteFungible: buy_weight required {:?}", required);
+
 		let (used, _) = payment.less(required).map_err(|_| ())?;
+		log::warn!(target: "pint_xcm", "FixedRateOfConcreteFungible: buy_weight used success {:?}", used);
 		self.0 = self.0.saturating_add(weight);
 		Ok(used)
 	}
@@ -93,6 +103,7 @@ impl<T: Get<(MultiLocation, u128)>> WeightTrader for FixedRateOfConcreteFungible
 		let (id, units_per_second) = T::get();
 		let amount = units_per_second * (weight as u128) / 1_000_000_000_000u128;
 		let result = MultiAsset::ConcreteFungible { amount, id };
+		log::warn!(target: "pint_xcm", "FixedRateOfConcreteFungible: refund_weight result {:?}", result);
 		result
 	}
 }
