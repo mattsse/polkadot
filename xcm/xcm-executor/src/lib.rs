@@ -42,21 +42,32 @@ pub struct XcmExecutor<Config>(PhantomData<Config>);
 impl<Config: config::Config> ExecuteXcm<Config::Call> for XcmExecutor<Config> {
 	type Call = Config::Call;
 	fn execute_xcm(origin: MultiLocation, message: Xcm<Config::Call>, weight_limit: Weight) -> Outcome {
+		log::warn!(target: "pint_xcm", "execute_xcm: origin {:?} ",origin);
 		// TODO: #2841 #HARDENXCM We should identify recursive bombs here and bail.
 		let mut message = Xcm::<Config::Call>::from(message);
 		let shallow_weight = match Config::Weigher::shallow(&mut message) {
 			Ok(x) => x,
-			Err(()) => return Outcome::Error(XcmError::WeightNotComputable),
+			Err(()) => {
+				log::error!(target: "pint_xcm", "execute_xcm: shallow_weight WeightNotComputable");
+				return Outcome::Error(XcmError::WeightNotComputable)
+			},
 		};
 		let deep_weight = match Config::Weigher::deep(&mut message) {
 			Ok(x) => x,
-			Err(()) => return Outcome::Error(XcmError::WeightNotComputable),
+			Err(()) => {
+				log::error!(target: "pint_xcm", "execute_xcm: deep_weight WeightNotComputable");
+				return Outcome::Error(XcmError::WeightNotComputable)
+			},
 		};
 		let maximum_weight = match shallow_weight.checked_add(deep_weight) {
 			Some(x) => x,
-			None => return Outcome::Error(XcmError::WeightLimitReached),
+			None => {
+				log::error!(target: "pint_xcm", "execute_xcm: maximum_weight WeightLimitReached");
+				return Outcome::Error(XcmError::WeightLimitReached)
+			},
 		};
 		if maximum_weight > weight_limit {
+			log::error!(target: "pint_xcm", "execute_xcm: maximum_weight > weight_limit WeightLimitReached");
 			return Outcome::Error(XcmError::WeightLimitReached);
 		}
 		let mut trader = Config::Trader::new();
@@ -91,8 +102,12 @@ impl<Config: config::Config> XcmExecutor<Config> {
 			.or_else(|| Config::Weigher::shallow(&mut message).ok())
 			.ok_or(XcmError::WeightNotComputable)?;
 
+		log::info!(target: "pint_xcm", "do_execute_xcm: shallow_weight is executable");
+
 		Config::Barrier::should_execute(&origin, top_level, &message, shallow_weight, weight_credit)
 			.map_err(|()| XcmError::Barrier)?;
+
+		log::info!(target: "pint_xcm", "do_execute_xcm: should_execute is executable");
 
 		// The surplus weight, defined as the amount by which `shallow_weight` plus all nested
 		// `shallow_weight` values (ensuring no double-counting) is an overestimate of the actual weight
@@ -151,13 +166,17 @@ impl<Config: config::Config> XcmExecutor<Config> {
 			}
 			(origin, Xcm::Transact { origin_type, require_weight_at_most,  mut call }) => {
 				// We assume that the Relay-chain is allowed to use transact on this parachain.
+				log::info!(target: "pint_xcm", "do_execute_xcm: Transact");
 
 				// TODO: #2841 #TRANSACTFILTER allow the trait to issue filters for the relay-chain
 				let message_call = call.take_decoded().map_err(|_| XcmError::FailedToDecode)?;
+				log::info!(target: "pint_xcm", "do_execute_xcm: Transact successful decoded");
 				let dispatch_origin = Config::OriginConverter::convert_origin(origin, origin_type)
 					.map_err(|_| XcmError::BadOrigin)?;
+				log::info!(target: "pint_xcm", "do_execute_xcm: Transact good origin");
 				let weight = message_call.get_dispatch_info().weight;
 				ensure!(weight <= require_weight_at_most, XcmError::TooMuchWeightRequired);
+				log::info!(target: "pint_xcm", "do_execute_xcm: Transact dispatching");
 				let actual_weight = match message_call.dispatch(dispatch_origin) {
 					Ok(post_info) => post_info.actual_weight,
 					Err(error_and_info) => {
